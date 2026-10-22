@@ -1,0 +1,75 @@
+# SK하이닉스 단기(1~5거래일) 방향 점수 모델 설정
+# - 가중치·기준값은 백테스트 전의 '출발값'이다. 검증 후 조정할 것.
+# - rule 종류
+#     linear   : clip(sign * x / scale, -1, 1)
+#     discrete : 입력값(-1 ~ +1)을 그대로 사용
+#     trend / rsi / volume / reversal / streak : scoring.py 의 규칙 함수
+
+horizons:
+  1d:
+    label: 1일 예측
+    days: 1
+    areas: {global_semi: 0.30, flow: 0.20, technical: 0.25, macro: 0.15, industry: 0.10}
+  5d:
+    label: 5일 예측
+    days: 5
+    areas: {global_semi: 0.20, flow: 0.25, technical: 0.25, macro: 0.15, industry: 0.15}
+
+areas:
+  global_semi:
+    label: A. 글로벌 반도체
+    indicators:
+      - {key: sox_ret,  label: SOX 전일 수익률,          weight: 0.35, rule: linear, inputs: [sox_ret],  scale: 0.03}
+      - {key: mu_ret,   label: 마이크론 전일 수익률,      weight: 0.25, rule: linear, inputs: [mu_ret],   scale: 0.04}
+      - {key: nvda_ret, label: 엔비디아 전일 수익률,      weight: 0.20, rule: linear, inputs: [nvda_ret], scale: 0.04}
+      - {key: ewy_ret,  label: EWY(한국 ETF) 전일 수익률, weight: 0.20, rule: linear, inputs: [ewy_ret],  scale: 0.02}
+
+  flow:
+    label: B. 수급
+    indicators:
+      - {key: foreign_5d, label: 외국인 5일 순매수 / 20일 평균 거래대금, weight: 0.40, rule: linear, inputs: [foreign_5d_ratio], scale: 0.5}
+      - {key: inst_5d,    label: 기관 5일 순매수 / 20일 평균 거래대금,   weight: 0.20, rule: linear, inputs: [inst_5d_ratio],    scale: 0.5}
+      - {key: streak,     label: 외국인 연속 순매수(+)/순매도(-) 일수,   weight: 0.20, rule: streak, inputs: [foreign_streak]}
+      - {key: short,      label: 공매도 잔고 비중 5일 변화,             weight: 0.20, rule: linear, inputs: [short_change],     scale: 0.10, sign: -1}
+
+  technical:
+    label: C. 가격·기술적
+    indicators:
+      - {key: trend,    label: 추세 (종가·5일선·20일선), weight: 0.30, rule: trend,    inputs: [close, ma5, ma20]}
+      - {key: rsi,      label: RSI(14),                  weight: 0.25, rule: rsi,      inputs: [rsi14]}
+      - {key: volume,   label: 거래량 비율 × 가격 방향,   weight: 0.25, rule: volume,   inputs: [vol_ratio, day_ret]}
+      - {key: reversal, label: 3일 과열·반전,            weight: 0.20, rule: reversal, inputs: [ret_3d]}
+
+  macro:
+    label: D. 매크로·환율
+    indicators:
+      - {key: usdkrw, label: 원/달러 전일 변화율,       weight: 0.35, rule: linear, inputs: [usdkrw_chg],        scale: 0.007, sign: -1}
+      - {key: us10y,  label: 미 국채 10년물 변화(bp),   weight: 0.25, rule: linear, inputs: [us10y_chg_bp],      scale: 10,    sign: -1}
+      - {key: vix,    label: VIX 변화율,                weight: 0.20, rule: linear, inputs: [vix_chg],           scale: 0.15,  sign: -1}
+      - {key: kospi_foreign, label: KOSPI 외국인 순매수(원), weight: 0.20, rule: linear, inputs: [kospi_foreign_net], scale: 5.0e+11}
+
+  industry:
+    label: E. 업황·이벤트 (수동 입력)
+    indicators:
+      - {key: dram,   label: DRAM 현물가 2주 변화율,          weight: 0.35, rule: linear,   inputs: [dram_chg],           scale: 0.05}
+      - {key: eps,    label: 실적 전망·목표가 변화 (-1/0/+1), weight: 0.30, rule: discrete, inputs: [eps_revision]}
+      - {key: export, label: 반도체 수출 서프라이즈(%p),      weight: 0.15, rule: linear,   inputs: [export_surprise_pp], scale: 10}
+      - {key: news,   label: 뉴스 감성 (-1/0/+1),             weight: 0.20, rule: discrete, inputs: [news]}
+
+# 판단 구간 (조정 점수 기준, 위에서부터 첫 번째로 만족하는 구간)
+judgement:
+  - {min: 50,   label: 강한 상승 우위}
+  - {min: 20,   label: 상승 우위}
+  - {min: -20,  label: 중립}
+  - {min: -50,  label: 하락 우위}
+  - {min: -100, label: 강한 하락 우위}
+
+filters:
+  max_missing_weight: 0.20      # 결측 가중치가 이보다 크면 판단 보류
+  high_vol_level: 30            # VIX 또는 VKOSPI가 이 값을 넘으면
+  high_vol_threshold_mult: 1.5  #   판단 구간 경계를 이 배수로 넓힘
+  conflict_level: 0.6           # 영역 점수가 +0.6 이상과 -0.6 이하로 동시에 있으면 신뢰도 낮음
+  # 예측 기간 안에 반영되는 이벤트 등급별 점수 배수 (여러 개면 가장 작은 값)
+  event_multiplier:
+    1d: {1: 0.5, 2: 0.85}
+    5d: {1: 0.7, 2: 0.85}

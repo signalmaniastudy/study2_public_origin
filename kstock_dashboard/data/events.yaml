@@ -1,0 +1,75 @@
+# 주요 이벤트 일정
+# - status: confirmed(공식 확인) / estimated(예상일, 공식 캘린더에서 확인 후 confirmed로 변경)
+# - time + tz: 발표 시각과 시간대(ET 또는 KST). 한국시간 변환과 서머타임은 코드에서 자동 처리
+# - time이 없으면 발표일 당일 한국장에 반영되는 것으로 본다
+# - tier: 1(점수 강하게 조정) / 2(약하게 조정) / 3(표시만)
+# - 옵션 만기(둘째 목요일)와 미국 신규 실업수당 청구(매주 목요일)는 코드가 규칙으로 생성
+#
+# 공식 출처: 연준 FOMC 캘린더, BLS·BEA 발표 일정, 한국은행 금통위 일정,
+#            관세청·산업통상자원부 보도 일정, 각 기업 IR, KRX 휴장일 공지
+
+# KRX 휴장일 (2026년, KRX 공지로 반드시 재확인)
+krx_holidays:
+  - 2026-01-01
+  - 2026-02-16
+  - 2026-02-17
+  - 2026-02-18
+  - 2026-03-02
+  - 2026-05-01
+  - 2026-05-05
+  - 2026-05-25
+  - 2026-06-03
+  - 2026-08-17
+  - 2026-09-24
+  - 2026-09-25
+  - 2026-10-05
+  - 2026-10-09
+  - 2026-12-25
+  - 2026-12-31
+  - 2027-01-01
+
+events:
+  # ---------------- 미국 매크로
+  - {date: 2026-10-28, time: "14:00", tz: ET, title: FOMC 금리 결정, region: US, category: 미국 매크로, tier: 1, status: estimated, note: "연준 2026 일정(10/27~28) 기준"}
+  - {date: 2026-12-09, time: "14:00", tz: ET, title: FOMC 금리 결정 (점도표), region: US, category: 미국 매크로, tier: 1, status: estimated, note: "연준 2026 일정(12/8~9) 기준"}
+  - {date: 2026-10-29, time: "08:30", tz: ET, title: 미국 3분기 GDP 속보치, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-10-30, time: "08:30", tz: ET, title: 미국 PCE 물가, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-11-02, time: "10:00", tz: ET, title: 미국 ISM 제조업 PMI, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-11-06, time: "08:30", tz: ET, title: 미국 고용보고서 (NFP), region: US, category: 미국 매크로, tier: 1}
+  - {date: 2026-11-12, time: "08:30", tz: ET, title: 미국 CPI, region: US, category: 미국 매크로, tier: 1}
+  - {date: 2026-11-13, time: "08:30", tz: ET, title: 미국 PPI, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-11-17, time: "08:30", tz: ET, title: 미국 소매판매, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-11-25, time: "08:30", tz: ET, title: 미국 PCE 물가, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-12-01, time: "10:00", tz: ET, title: 미국 ISM 제조업 PMI, region: US, category: 미국 매크로, tier: 2}
+  - {date: 2026-12-04, time: "08:30", tz: ET, title: 미국 고용보고서 (NFP), region: US, category: 미국 매크로, tier: 1}
+  - {date: 2026-12-10, time: "08:30", tz: ET, title: 미국 CPI, region: US, category: 미국 매크로, tier: 1}
+  - {date: 2026-12-11, time: "08:30", tz: ET, title: 미국 PPI, region: US, category: 미국 매크로, tier: 2}
+
+  # ---------------- 한국 매크로
+  - {date: 2026-11-26, time: "10:00", tz: KST, title: 한국은행 금통위 금리 결정, region: KR, category: 한국 매크로, tier: 1}
+  - {date: 2026-11-01, time: "09:00", tz: KST, title: 10월 수출입 동향, region: KR, category: 한국 매크로, tier: 2}
+  - {date: 2026-11-03, time: "08:00", tz: KST, title: 한국 CPI, region: KR, category: 한국 매크로, tier: 3}
+  - {date: 2026-11-11, time: "09:00", tz: KST, title: 11월 1~10일 수출 잠정치, region: KR, category: 한국 매크로, tier: 2}
+  - {date: 2026-11-21, time: "09:00", tz: KST, title: 11월 1~20일 수출 잠정치, region: KR, category: 한국 매크로, tier: 2}
+  - {date: 2026-12-01, time: "09:00", tz: KST, title: 11월 수출입 동향, region: KR, category: 한국 매크로, tier: 2}
+  - {date: 2026-12-11, time: "09:00", tz: KST, title: 12월 1~10일 수출 잠정치, region: KR, category: 한국 매크로, tier: 2}
+  - {date: 2026-12-21, time: "09:00", tz: KST, title: 12월 1~20일 수출 잠정치, region: KR, category: 한국 매크로, tier: 2}
+  - {date: 2027-01-01, time: "09:00", tz: KST, title: 12월 수출입 동향, region: KR, category: 한국 매크로, tier: 2}
+
+  # ---------------- 실적
+  - {date: 2026-10-29, title: SK하이닉스 3분기 실적, region: KR, category: 실적, tier: 1, note: "확정 공시(실적 발표 예고) 확인"}
+  - {date: 2026-10-29, title: 삼성전자 3분기 확정 실적, region: KR, category: 실적, tier: 2}
+  - {date: 2026-11-18, time: "16:20", tz: ET, title: 엔비디아 실적, region: US, category: 실적, tier: 1}
+  - {date: 2026-12-16, time: "16:00", tz: ET, title: 마이크론 실적, region: US, category: 실적, tier: 1}
+  - {date: 2026-11-10, title: TSMC 10월 매출, region: TW, category: 실적, tier: 2}
+  - {date: 2026-12-10, title: TSMC 11월 매출, region: TW, category: 실적, tier: 2}
+  - {date: 2027-01-07, time: "08:00", tz: KST, title: 삼성전자 4분기 잠정 실적, region: KR, category: 실적, tier: 1}
+
+  # ---------------- 시장 구조
+  - {date: 2026-11-11, time: "17:00", tz: ET, title: MSCI 11월 정기 리뷰 발표, region: GL, category: 시장 구조, tier: 2}
+  - {date: 2026-11-30, time: "15:30", tz: KST, title: MSCI 리밸런싱 반영 (장 마감), region: GL, category: 시장 구조, tier: 2}
+  - {date: 2026-12-11, title: KOSPI200 정기 변경 적용, region: KR, category: 시장 구조, tier: 2}
+
+  # ---------------- 휴장 (미국 휴장 다음 날에는 해외 신호가 없음)
+  - {date: 2026-11-26, title: 미국 휴장 (추수감사절), region: US, category: 휴장, tier: 3}
+  - {date: 2026-12-25, title: 한국·미국 휴장 (성탄절), region: GL, category: 휴장, tier: 3}
