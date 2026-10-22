@@ -7,6 +7,10 @@ SK하이닉스를 대상으로 1~5거래일 방향을 점수(-100 ~ +100)로 추
 
 ## 실행
 
+**Windows:** `Run_program.bat`을 더블클릭하세요. 처음 실행할 때는 가상환경(`.venv`)을 만들고 패키지를 설치하느라 몇 분 걸리고, 다음부터는 바로 실행됩니다. 패키지를 다시 설치하려면 `.venv\installed.txt`를 지우세요. (Python 3.10 이상 필요)
+
+**직접 실행:**
+
 ```bash
 cd kstock_dashboard
 pip install -r requirements.txt
