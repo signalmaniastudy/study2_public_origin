@@ -18,7 +18,7 @@ UP, DOWN = "#d62728", "#1f77b4"  # 한국식: 상승 빨강, 하락 파랑
 
 @st.cache_data(ttl=600, show_spinner="데이터 불러오는 중…")
 def get_market(mode: str):
-    return load_market(mode)
+    return load_market(mode), datetime.now(cal.KST)
 
 
 @st.cache_data(ttl=3600)
@@ -29,7 +29,7 @@ def get_events():
 
 @st.cache_data(ttl=3600, show_spinner="백테스트 계산 중…")
 def get_backtest(mode: str, horizon: str):
-    return run_backtest(get_market(mode), horizon)
+    return run_backtest(get_market(mode)[0], horizon)
 
 
 def target_session(holidays) -> date:
@@ -50,6 +50,10 @@ with st.sidebar:
     st.header("설정")
     mode = st.radio("데이터", ["auto", "live", "sample"], index=0,
                     format_func={"auto": "자동 (실패 시 샘플)", "live": "실데이터만", "sample": "샘플"}.get)
+    st.subheader("데이터 새로고침")
+    refresh_now = st.button("🔄 지금 새로고침", use_container_width=True)
+    refresh_min = st.selectbox("자동 새로고침", [0, 1, 5, 10, 30], index=0,
+                               format_func=lambda m: "끄기" if m == 0 else f"{m}분마다")
     st.subheader("E. 업황·이벤트 (수동 입력)")
     st.caption("무료 자동 수집이 어려운 지표입니다. 입력하지 않으면 결측으로 처리됩니다.")
     manual = {}
@@ -68,11 +72,32 @@ with st.sidebar:
     st.divider()
     st.caption("분석 보조 도구이며 투자 권유가 아닙니다. 가중치는 백테스트 전 출발값입니다.")
 
-md = get_market(mode)
+if refresh_now:
+    get_market.clear()
+    get_backtest.clear()
+
+
+@st.fragment(run_every=refresh_min * 60 if refresh_min else None)
+def auto_refresh():
+    """전체 실행 때는 표시만 하고, 타이머로 다시 실행될 때 캐시를 비우고 화면 전체를 새로 그린다."""
+    if st.session_state.pop("_full_run", False):
+        return
+    get_market.clear()
+    get_backtest.clear()
+    st.rerun(scope="app")
+
+
+st.session_state["_full_run"] = True
+auto_refresh()
+
+md, fetched_at = get_market(mode)
 today = datetime.now(cal.KST).date()
 target = target_session(holidays)
 
 st.title("📈 한국 증시 단기 대시보드")
+st.caption(f"마지막 업데이트: {fetched_at:%Y-%m-%d %H:%M:%S} KST"
+           + (f" · {refresh_min}분마다 자동 새로고침" if refresh_min else " · 자동 새로고침 꺼짐")
+           + " · 국내 시세는 yfinance 기준 약 15~20분 지연될 수 있음")
 if md.source == "sample":
     st.warning("⚠️ **샘플(합성) 데이터**로 표시 중입니다. 화면 확인용이며 실제 시장과 무관합니다."
                + (f" (실데이터 수집 실패 {len(md.errors)}건)" if md.errors else ""))
