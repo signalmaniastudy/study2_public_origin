@@ -1,28 +1,25 @@
-# SK하이닉스 단기(1~5거래일) 방향 점수 모델 설정
+# 종목 단기(1~5거래일) 방향 점수 모델 설정
 # - 가중치·기준값은 백테스트 전의 '출발값'이다. 검증 후 조정할 것.
 # - rule 종류
 #     linear   : clip(sign * x / scale, -1, 1)
 #     discrete : 입력값(-1 ~ +1)을 그대로 사용
 #     trend / rsi / volume / reversal / streak : scoring.py 의 규칙 함수
+# - A 영역(글로벌 연관 지표)은 종목의 업종 프로필(sector_profiles)에서 채워진다.
 
 horizons:
   1d:
     label: 1일 예측
     days: 1
-    areas: {global_semi: 0.30, flow: 0.20, technical: 0.25, macro: 0.15, industry: 0.10}
+    areas: {global: 0.30, flow: 0.20, technical: 0.25, macro: 0.15, industry: 0.10}
   5d:
     label: 5일 예측
     days: 5
-    areas: {global_semi: 0.20, flow: 0.25, technical: 0.25, macro: 0.15, industry: 0.15}
+    areas: {global: 0.20, flow: 0.25, technical: 0.25, macro: 0.15, industry: 0.15}
 
 areas:
-  global_semi:
-    label: A. 글로벌 반도체
-    indicators:
-      - {key: sox_ret,  label: SOX 전일 수익률,          weight: 0.35, rule: linear, inputs: [sox_ret],  scale: 0.03}
-      - {key: mu_ret,   label: 마이크론 전일 수익률,      weight: 0.25, rule: linear, inputs: [mu_ret],   scale: 0.04}
-      - {key: nvda_ret, label: 엔비디아 전일 수익률,      weight: 0.20, rule: linear, inputs: [nvda_ret], scale: 0.04}
-      - {key: ewy_ret,  label: EWY(한국 ETF) 전일 수익률, weight: 0.20, rule: linear, inputs: [ewy_ret],  scale: 0.02}
+  global:
+    label: A. 글로벌 연관 지표
+    indicators: []   # 업종 프로필의 peers 로 채워짐
 
   flow:
     label: B. 수급
@@ -51,9 +48,9 @@ areas:
   industry:
     label: E. 업황·이벤트 (수동 입력)
     indicators:
-      - {key: dram,   label: DRAM 현물가 2주 변화율,          weight: 0.35, rule: linear,   inputs: [dram_chg],           scale: 0.05}
+      - {key: industry, label: 업황 지표 2주 변화율,          weight: 0.35, rule: linear,   inputs: [industry_chg],       scale: 0.05}
       - {key: eps,    label: 실적 전망·목표가 변화 (-1/0/+1), weight: 0.30, rule: discrete, inputs: [eps_revision]}
-      - {key: export, label: 반도체 수출 서프라이즈(%p),      weight: 0.15, rule: linear,   inputs: [export_surprise_pp], scale: 10}
+      - {key: export, label: 수출 서프라이즈(%p),      weight: 0.15, rule: linear,   inputs: [export_surprise_pp], scale: 10}
       - {key: news,   label: 뉴스 감성 (-1/0/+1),             weight: 0.20, rule: discrete, inputs: [news]}
 
 # 판단 구간 (조정 점수 기준, 위에서부터 첫 번째로 만족하는 구간)
@@ -73,3 +70,83 @@ filters:
   event_multiplier:
     1d: {1: 0.5, 2: 0.85}
     5d: {1: 0.7, 2: 0.85}
+
+# 업종 프로필: A 영역에 쓰는 해외 연관 지표(전일 수익률)와 E 영역 업황 지표 이름
+# scale: 이만큼 오르면 +1점 (지수·ETF는 2~3%, 개별 종목은 4% 내외)
+sector_profiles:
+  semiconductor:
+    label: 반도체
+    industry_label: DRAM 현물가 2주 변화율
+    peers:
+      - {ticker: ^SOX, label: 필라델피아 반도체, weight: 0.35, scale: 0.03}
+      - {ticker: MU,   label: 마이크론,          weight: 0.25, scale: 0.04}
+      - {ticker: NVDA, label: 엔비디아,          weight: 0.20, scale: 0.04}
+      - {ticker: EWY,  label: EWY(한국 ETF),     weight: 0.20, scale: 0.02}
+  battery:
+    label: 2차전지
+    industry_label: 리튬 가격 2주 변화율
+    peers:
+      - {ticker: TSLA, label: 테슬라,             weight: 0.30, scale: 0.05}
+      - {ticker: LIT,  label: 리튬·배터리 ETF,    weight: 0.30, scale: 0.03}
+      - {ticker: ALB,  label: 앨버말,             weight: 0.20, scale: 0.05}
+      - {ticker: EWY,  label: EWY(한국 ETF),      weight: 0.20, scale: 0.02}
+  auto:
+    label: 자동차
+    industry_label: 미국 자동차 판매 2주 변화율
+    peers:
+      - {ticker: GM,  label: GM,              weight: 0.30, scale: 0.04}
+      - {ticker: TM,  label: 도요타,          weight: 0.25, scale: 0.03}
+      - {ticker: F,   label: 포드,            weight: 0.20, scale: 0.04}
+      - {ticker: EWY, label: EWY(한국 ETF),   weight: 0.25, scale: 0.02}
+  bio:
+    label: 바이오·제약
+    industry_label: 업황 지표 2주 변화율
+    peers:
+      - {ticker: XBI, label: 미국 바이오 ETF(XBI), weight: 0.40, scale: 0.03}
+      - {ticker: IBB, label: 미국 바이오 ETF(IBB), weight: 0.30, scale: 0.025}
+      - {ticker: EWY, label: EWY(한국 ETF),        weight: 0.30, scale: 0.02}
+  internet:
+    label: 인터넷·게임·엔터
+    industry_label: 업황 지표 2주 변화율
+    peers:
+      - {ticker: ^IXIC, label: 나스닥,        weight: 0.35, scale: 0.02}
+      - {ticker: META,  label: 메타,          weight: 0.20, scale: 0.04}
+      - {ticker: GOOGL, label: 알파벳,        weight: 0.20, scale: 0.04}
+      - {ticker: EWY,   label: EWY(한국 ETF), weight: 0.25, scale: 0.02}
+  finance:
+    label: 금융
+    industry_label: 업황 지표 2주 변화율
+    peers:
+      - {ticker: XLF, label: 미국 금융 ETF,   weight: 0.35, scale: 0.02}
+      - {ticker: KBE, label: 미국 은행 ETF,   weight: 0.25, scale: 0.025}
+      - {ticker: EWY, label: EWY(한국 ETF),   weight: 0.40, scale: 0.02}
+  industrials:
+    label: 조선·방산·전력기기
+    industry_label: 신규 수주 2주 변화율
+    peers:
+      - {ticker: XLI, label: 미국 산업재 ETF,   weight: 0.25, scale: 0.02}
+      - {ticker: ITA, label: 미국 방산 ETF,     weight: 0.25, scale: 0.02}
+      - {ticker: GEV, label: GE 버노바(전력),   weight: 0.25, scale: 0.04}
+      - {ticker: EWY, label: EWY(한국 ETF),     weight: 0.25, scale: 0.02}
+  energy_chem:
+    label: 정유·화학·소재
+    industry_label: 제품 스프레드 2주 변화율
+    peers:
+      - {ticker: CL=F, label: WTI 유가,        weight: 0.30, scale: 0.03}
+      - {ticker: XLE,  label: 미국 에너지 ETF,  weight: 0.20, scale: 0.02}
+      - {ticker: XLB,  label: 미국 소재 ETF,    weight: 0.20, scale: 0.02}
+      - {ticker: EWY,  label: EWY(한국 ETF),    weight: 0.30, scale: 0.02}
+  consumer:
+    label: 소비재·화장품·식품
+    industry_label: 수출 지표 2주 변화율
+    peers:
+      - {ticker: XLP,  label: 미국 필수소비재 ETF, weight: 0.30, scale: 0.015}
+      - {ticker: KWEB, label: 중국 인터넷 ETF,     weight: 0.30, scale: 0.03}
+      - {ticker: EWY,  label: EWY(한국 ETF),       weight: 0.40, scale: 0.02}
+  default:
+    label: 기타 (시장 전체)
+    industry_label: 업황 지표 2주 변화율
+    peers:
+      - {ticker: ^GSPC, label: S&P 500,       weight: 0.30, scale: 0.015}
+      - {ticker: ^IXIC, label: 나스닥,        weight: 0.30, scale: 0.02}
+      - {ticker: EWY,   label: EWY(한국 ETF), weight: 0.40, scale: 0.02}

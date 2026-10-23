@@ -112,6 +112,8 @@ def build_events(raw: dict | None = None, include_rules: bool = True) -> pd.Data
         rows += generate_jobless_claims(date(years[0], 1, 1), date(years[-1], 12, 31))
 
     for r in rows:
+        r["ticker"] = str(r["ticker"]) if r.get("ticker") else ""
+        r["sectors"] = list(r.get("sectors") or [])
         r.setdefault("time", None)
         r.setdefault("tz", "KST")
         r.setdefault("status", "estimated")
@@ -125,6 +127,16 @@ def build_events(raw: dict | None = None, include_rules: bool = True) -> pd.Data
     if df.empty:
         return df
     return df.sort_values(["impact_date", "tier"]).reset_index(drop=True)
+
+
+def applies_to(events: pd.DataFrame, code: str, sector: str) -> pd.Series:
+    """종목에 적용되는 이벤트: 시장 전체 이벤트 + 그 종목 이벤트 + 그 업종 이벤트."""
+    if events.empty:
+        return pd.Series(dtype=bool)
+    market_wide = (events["ticker"] == "") & (events["sectors"].map(len) == 0)
+    own = events["ticker"] == code
+    sec = events["sectors"].map(lambda s: sector in s)
+    return market_wide | own | sec
 
 
 def risk_adjustment(events: pd.DataFrame, target: date, horizon_days: int,

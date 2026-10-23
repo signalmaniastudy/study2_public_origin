@@ -1,6 +1,8 @@
 """시세·수급 데이터 수집과 점수 모델 입력값(snapshot) 계산.
 
-- 실데이터: yfinance(해외 지수·환율·금리, SK하이닉스 시세), pykrx(투자자별 수급, 공매도)
+- 공통 시장 데이터: 국내외 지수, 환율, 금리, VIX, KOSPI 외국인 수급
+- 종목 데이터: 종목 시세(yfinance), 투자자별 수급·공매도(pykrx)
+- 해외 연관 지표(peers): 업종 프로필별 해외 지수·종목 (config/model.yaml)
 - 샘플 데이터: 네트워크가 막혀 있거나 시연할 때 쓰는 합성 데이터 (투자 판단에 사용 금지)
 
 시점 정렬 원칙: 한국장 거래일 T를 예측할 때는 날짜가 T보다 앞선 데이터만 쓴다.
@@ -8,23 +10,22 @@
 """
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
 
-TICKER = "000660"  # SK하이닉스
+HISTORY_DAYS = 500
 
-YF_TICKERS = {
-    "hynix": "000660.KS",
+COMMON_TICKERS = {
     "kospi": "^KS11",
     "kosdaq": "^KQ11",
-    "sox": "^SOX",
-    "mu": "MU",
-    "nvda": "NVDA",
-    "ewy": "EWY",
+    "sp500": "^GSPC",
     "nasdaq": "^IXIC",
+    "sox": "^SOX",
+    "ewy": "EWY",
     "usdkrw": "KRW=X",
     "us10y": "^TNX",
     "vix": "^VIX",
@@ -32,18 +33,28 @@ YF_TICKERS = {
 }
 
 LABELS = {
-    "hynix": "SK하이닉스", "kospi": "KOSPI", "kosdaq": "KOSDAQ", "sox": "필라델피아 반도체",
-    "mu": "마이크론", "nvda": "엔비디아", "ewy": "EWY", "nasdaq": "나스닥", "usdkrw": "원/달러",
-    "us10y": "미 국채 10년(%)", "vix": "VIX", "wti": "WTI",
+    "kospi": "KOSPI", "kosdaq": "KOSDAQ", "sp500": "S&P 500", "nasdaq": "나스닥", "sox": "필라델피아 반도체",
+    "ewy": "EWY", "usdkrw": "원/달러", "us10y": "미 국채 10년(%)", "vix": "VIX", "wti": "WTI",
 }
+
+YF_SUFFIX = {"KOSPI": ".KS", "KOSDAQ": ".KQ"}
 
 
 @dataclass
 class MarketData:
+    """모든 종목이 함께 쓰는 시장 데이터."""
     prices: dict[str, pd.DataFrame]          # name -> OHLCV (index: date)
-    flows: pd.DataFrame | None = None        # SK하이닉스 투자자별 순매수 금액 (외국인, 기관)
     kospi_flows: pd.DataFrame | None = None  # KOSPI 투자자별 순매수 금액
-    short: pd.DataFrame | None = None        # 공매도 잔고 비중
+    source: str = "live"
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class StockData:
+    code: str
+    ohlcv: pd.DataFrame | None = None
+    flows: pd.DataFrame | None = None        # 투자자별 순매수 금액 (foreign, inst)
+    short: pd.DataFrame | None = None        # 공매도 잔고 비중 (ratio)
     source: str = "live"
     errors: list[str] = field(default_factory=list)
 
@@ -63,95 +74,165 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
 
 
 # ---------------------------------------------------------------- 실데이터
-def load_live(days: int = 500) -> MarketData:
+def _start(days: int) -> date:
+    return date.today() - timedelta(days=days)
+
+
+def _yf_history(ticker: str, days: int = HISTORY_DAYS) -> pd.DataFrame:
     import yfinance as yf
 
-    start = date.today() - timedelta(days=days)
+    df = yf.Ticker(ticker).history(start=_start(days).isoformat(), auto_adjust=False)
+    if df.empty:
+        raise ValueError("빈 데이터")
+    df.index = pd.to_datetime(df.index.date)
+    return df[["Open", "High", "Low", "Close", "Volume"]]
+
+
+def load_common_live(days: int = HISTORY_DAYS) -> MarketData:
     prices, errors = {}, []
-    for name, tk in YF_TICKERS.items():
+    for name, tk in COMMON_TICKERS.items():
         try:
-            df = yf.Ticker(tk).history(start=start.isoformat(), auto_adjust=False)
-            if df.empty:
-                raise ValueError("빈 데이터")
-            df.index = pd.to_datetime(df.index.date)
-            prices[name] = df[["Open", "High", "Low", "Close", "Volume"]]
+            prices[name] = _yf_history(tk, days)
         except Exception as e:  # 네트워크·상장폐지 등
             errors.append(f"yfinance {tk}: {e}")
-
     md = MarketData(prices=prices, source="live", errors=errors)
     try:
         from pykrx import stock
 
-        s, e = start.strftime("%Y%m%d"), date.today().strftime("%Y%m%d")
-        f = stock.get_market_trading_value_by_date(s, e, TICKER)
-        md.flows = f.rename(columns={"외국인합계": "foreign", "기관합계": "inst"})[["foreign", "inst"]]
+        s, e = _start(days).strftime("%Y%m%d"), date.today().strftime("%Y%m%d")
         k = stock.get_market_trading_value_by_date(s, e, "KOSPI")
         md.kospi_flows = k.rename(columns={"외국인합계": "foreign"})[["foreign"]]
-        sh = stock.get_shorting_balance_by_date(s, e, TICKER)
-        md.short = sh.rename(columns={"비중": "ratio"})[["ratio"]]
     except Exception as ex:
-        errors.append(f"pykrx: {ex}")
+        errors.append(f"pykrx KOSPI 수급: {ex}")
     return md
+
+
+def load_stock_live(code: str, market: str = "", days: int = HISTORY_DAYS) -> StockData:
+    sd = StockData(code=code, source="live")
+    suffixes = [YF_SUFFIX[market]] if market in YF_SUFFIX else [".KS", ".KQ"]
+    for suf in suffixes:
+        try:
+            sd.ohlcv = _yf_history(code + suf, days)
+            break
+        except Exception as e:
+            sd.errors.append(f"yfinance {code}{suf}: {e}")
+    if sd.ohlcv is not None:
+        sd.errors = []
+    try:
+        from pykrx import stock
+
+        s, e = _start(days).strftime("%Y%m%d"), date.today().strftime("%Y%m%d")
+        f = stock.get_market_trading_value_by_date(s, e, code)
+        sd.flows = f.rename(columns={"외국인합계": "foreign", "기관합계": "inst"})[["foreign", "inst"]]
+        sh = stock.get_shorting_balance_by_date(s, e, code)
+        sd.short = sh.rename(columns={"비중": "ratio"})[["ratio"]]
+    except Exception as ex:
+        sd.errors.append(f"pykrx {code}: {ex}")
+    return sd
+
+
+def load_peers_live(tickers: list[str], days: int = HISTORY_DAYS) -> tuple[dict[str, pd.DataFrame], list[str]]:
+    out, errors = {}, []
+    for tk in tickers:
+        try:
+            out[tk] = _yf_history(tk, days)
+        except Exception as e:
+            errors.append(f"yfinance {tk}: {e}")
+    return out, errors
 
 
 # ---------------------------------------------------------------- 샘플 데이터
-def load_sample(days: int = 500, seed: int = 7) -> MarketData:
-    """합성 데이터. 미국 T-1일 공통 요인이 한국 T일 시가 갭에 반영되는 구조만 흉내 낸다."""
-    rng = np.random.default_rng(seed)
-    idx = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=days)
+def _seed(key: str) -> int:
+    return zlib.crc32(key.encode())
+
+
+def _sample_index(days: int) -> pd.DatetimeIndex:
+    return pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=days)
+
+
+def _sample_ohlcv(key: str, start: float, vol: float, days: int, base_volume: float = 1e6) -> pd.DataFrame:
+    """합성 OHLCV. 시가 갭과 장중 변동을 분리해 '시가→종가' 백테스트가 가능하게 만든다."""
+    rng = np.random.default_rng(_seed(key))
+    idx = _sample_index(days)
     n = len(idx)
-    f = rng.normal(0.0004, 0.015, n)  # 글로벌 반도체 공통 요인
+    gap = rng.normal(0, vol * 0.4, n)
+    rets = gap + rng.normal(0.0003, vol, n)
+    close = start * np.exp(np.cumsum(rets))
+    open_ = np.r_[close[0], close[:-1]] * np.exp(gap)
+    high = np.maximum(open_, close) * (1 + abs(rng.normal(0, vol / 2, n)))
+    low = np.minimum(open_, close) * (1 - abs(rng.normal(0, vol / 2, n)))
+    volume = base_volume * np.exp(rng.normal(0, 0.35, n))
+    return pd.DataFrame({"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume}, index=idx)
 
-    def ohlcv(rets, start, vol=0.01, base_volume=1e6, gap=None):
-        close = start * np.exp(np.cumsum(rets))
-        open_ = np.r_[close[0], close[:-1]] * (1 + (gap if gap is not None else rng.normal(0, vol / 3, n)))
-        high = np.maximum(open_, close) * (1 + abs(rng.normal(0, vol / 2, n)))
-        low = np.minimum(open_, close) * (1 - abs(rng.normal(0, vol / 2, n)))
-        volume = base_volume * np.exp(rng.normal(0, 0.35, n))
-        return pd.DataFrame({"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume}, index=idx)
 
-    lag_f = np.r_[0, f[:-1]]
-    gap = 0.8 * lag_f + rng.normal(0, 0.005, n)
-    hynix_ret = gap + rng.normal(0, 0.018, n)
-    prices = {
-        "sox": ohlcv(1.2 * f + rng.normal(0, 0.006, n), 5000),
-        "mu": ohlcv(1.5 * f + rng.normal(0, 0.012, n), 110),
-        "nvda": ohlcv(1.3 * f + rng.normal(0, 0.014, n), 140),
-        "nasdaq": ohlcv(0.6 * f + rng.normal(0, 0.006, n), 18000),
-        "ewy": ohlcv(0.5 * f + rng.normal(0, 0.008, n), 65),
-        "hynix": ohlcv(hynix_ret, 180000, 0.02, 3e6, gap=gap),
-        "kospi": ohlcv(0.5 * lag_f + rng.normal(0, 0.008, n), 2600),
-        "kosdaq": ohlcv(0.4 * lag_f + rng.normal(0, 0.010, n), 800),
-        "usdkrw": ohlcv(-0.1 * f + rng.normal(0, 0.003, n), 1380, 0.003),
-        "wti": ohlcv(rng.normal(0, 0.018, n), 72),
-    }
-    prices["us10y"] = pd.DataFrame({c: 4.2 + np.cumsum(rng.normal(0, 0.04, n)) for c in ["Open", "High", "Low", "Close"]}, index=idx)
-    prices["us10y"]["Volume"] = 0
+def load_common_sample(days: int = HISTORY_DAYS) -> MarketData:
+    starts = {"kospi": (2600, 0.008), "kosdaq": (800, 0.01), "sp500": (5800, 0.008), "nasdaq": (18000, 0.01),
+              "sox": (5000, 0.018), "ewy": (65, 0.01), "usdkrw": (1380, 0.003), "wti": (72, 0.018)}
+    prices = {k: _sample_ohlcv(f"common:{k}", s, v, days) for k, (s, v) in starts.items()}
+    idx = _sample_index(days)
+    rng = np.random.default_rng(_seed("common:macro"))
+    n = len(idx)
+    us10y = 4.2 + np.cumsum(rng.normal(0, 0.04, n))
     vix = np.empty(n)
     vix[0] = 16.0
     for i in range(1, n):  # 평균 회귀하는 VIX
-        vix[i] = vix[i - 1] + 0.1 * (16 - vix[i - 1]) - 60 * f[i] + rng.normal(0, 0.8)
+        vix[i] = vix[i - 1] + 0.1 * (16 - vix[i - 1]) + rng.normal(0, 1.0)
     vix = np.clip(vix, 10, 45)
+    prices["us10y"] = pd.DataFrame({"Open": us10y, "High": us10y, "Low": us10y, "Close": us10y, "Volume": 0}, index=idx)
     prices["vix"] = pd.DataFrame({"Open": vix, "High": vix * 1.03, "Low": vix * 0.97, "Close": vix, "Volume": 0}, index=idx)
-
-    turnover = prices["hynix"]["Close"] * prices["hynix"]["Volume"]
-    foreign = turnover * (0.08 * np.sign(hynix_ret) + rng.normal(0, 0.06, n))
-    flows = pd.DataFrame({"foreign": foreign, "inst": turnover * rng.normal(0, 0.05, n)}, index=idx)
     kospi_flows = pd.DataFrame({"foreign": rng.normal(0, 3e11, n)}, index=idx)
-    short = pd.DataFrame({"ratio": 1.0 + np.cumsum(rng.normal(0, 0.02, n)).clip(-0.8, 3)}, index=idx)
-    return MarketData(prices, flows, kospi_flows, short, source="sample")
+    return MarketData(prices, kospi_flows, source="sample")
 
 
-def load_market(mode: str = "auto") -> MarketData:
-    """mode: auto(실데이터 실패 시 샘플) / live / sample"""
+def load_stock_sample(code: str, days: int = HISTORY_DAYS) -> StockData:
+    rng = np.random.default_rng(_seed(f"stock:{code}"))
+    start = float(rng.choice([8000, 25000, 60000, 150000, 400000]))
+    ohlcv = _sample_ohlcv(f"stock:{code}", start, 0.02, days, base_volume=2e6)
+    n = len(ohlcv)
+    turnover = ohlcv["Close"] * ohlcv["Volume"]
+    day_ret = ohlcv["Close"].pct_change().fillna(0).to_numpy()
+    flows = pd.DataFrame({"foreign": turnover * (2 * day_ret + rng.normal(0, 0.06, n)),
+                          "inst": turnover * rng.normal(0, 0.05, n)}, index=ohlcv.index)
+    short = pd.DataFrame({"ratio": 1.0 + np.cumsum(rng.normal(0, 0.02, n)).clip(-0.8, 3)}, index=ohlcv.index)
+    return StockData(code, ohlcv, flows, short, source="sample")
+
+
+def load_peers_sample(tickers: list[str], days: int = HISTORY_DAYS) -> dict[str, pd.DataFrame]:
+    return {tk: _sample_ohlcv(f"peer:{tk}", 100, 0.02, days) for tk in tickers}
+
+
+# ---------------------------------------------------------------- 모드별 로더
+# mode: auto(실데이터 실패 시 샘플) / live / sample
+def load_common(mode: str = "auto") -> MarketData:
     if mode == "sample":
-        return load_sample()
-    md = load_live()
-    if mode == "auto" and "hynix" not in md.prices:
-        sample = load_sample()
+        return load_common_sample()
+    md = load_common_live()
+    if mode == "auto" and not md.prices:
+        sample = load_common_sample()
         sample.errors = md.errors
         return sample
     return md
+
+
+def load_stock(code: str, market: str = "", mode: str = "auto") -> StockData:
+    if mode == "sample":
+        return load_stock_sample(code)
+    sd = load_stock_live(code, market)
+    if mode == "auto" and sd.ohlcv is None:
+        sample = load_stock_sample(code)
+        sample.errors = sd.errors
+        return sample
+    return sd
+
+
+def load_peers(tickers: list[str], mode: str = "auto") -> tuple[dict[str, pd.DataFrame], list[str], bool]:
+    """반환: (ticker -> OHLCV, 오류 목록, 샘플 사용 여부)"""
+    if mode == "sample":
+        return load_peers_sample(tickers), [], True
+    out, errors = load_peers_live(tickers)
+    if mode == "auto" and tickers and not out:
+        return load_peers_sample(tickers), errors, True
+    return out, errors, False
 
 
 # ---------------------------------------------------------------- snapshot
@@ -181,18 +262,22 @@ def _streak(s: pd.Series) -> int:
     return int(sign * n)
 
 
-def build_snapshot(md: MarketData, target: date | pd.Timestamp, manual: dict | None = None) -> dict:
+def peer_key(ticker: str) -> str:
+    return f"peer:{ticker}"
+
+
+def build_snapshot(md: MarketData, sd: StockData, peers: dict[str, pd.DataFrame],
+                   target: date | pd.Timestamp, manual: dict | None = None) -> dict:
     """한국장 거래일 target을 예측하기 위한 원시 지표 값 (target 이전 데이터만 사용)."""
     t = pd.Timestamp(target)
     p = md.prices
     snap: dict = {}
 
-    snap["sox_ret"] = _ret(p.get("sox"), t)
-    snap["mu_ret"] = _ret(p.get("mu"), t)
-    snap["nvda_ret"] = _ret(p.get("nvda"), t)
-    snap["ewy_ret"] = _ret(p.get("ewy"), t)
+    for tk, df in peers.items():
+        snap[peer_key(tk)] = _ret(df, t)
 
-    hx = _before(p.get("hynix"), t)
+    hx = _before(sd.ohlcv, t)
+    turnover20 = None
     if hx is not None and len(hx) >= 25:
         c = hx["Close"]
         snap.update({
@@ -206,20 +291,19 @@ def build_snapshot(md: MarketData, target: date | pd.Timestamp, manual: dict | N
             "atr14": float(atr(hx).iloc[-1]),
         })
         turnover20 = float((hx["Close"] * hx["Volume"]).iloc[-20:].mean())
-    else:
-        turnover20 = None
 
-    fl = _before(md.flows, t)
+    fl = _before(sd.flows, t)
     if fl is not None and len(fl) >= 5 and turnover20:
         snap["foreign_5d_ratio"] = float(fl["foreign"].iloc[-5:].sum() / turnover20)
         snap["inst_5d_ratio"] = float(fl["inst"].iloc[-5:].sum() / turnover20)
         snap["foreign_streak"] = _streak(fl["foreign"])
 
     # 공매도 잔고는 T+2일에 공개되므로 2거래일 늦춰서 사용
-    sh = _before(md.short, t)
+    sh = _before(sd.short, t)
     if sh is not None and len(sh) >= 8:
         r = sh["ratio"].iloc[:-2]
-        snap["short_change"] = float(r.iloc[-1] / r.iloc[-6] - 1)
+        if r.iloc[-6] > 0:
+            snap["short_change"] = float(r.iloc[-1] / r.iloc[-6] - 1)
 
     snap["usdkrw_chg"] = _ret(p.get("usdkrw"), t)
     us10y = _before(p.get("us10y"), t)
@@ -237,6 +321,13 @@ def build_snapshot(md: MarketData, target: date | pd.Timestamp, manual: dict | N
         if v is not None:
             snap[k] = v
     return snap
+
+
+def last_change(df: pd.DataFrame | None) -> tuple[float, float] | None:
+    if df is None or len(df) < 2:
+        return None
+    last, prev = df["Close"].iloc[-1], df["Close"].iloc[-2]
+    return float(last), float(last / prev - 1)
 
 
 def latest_quotes(md: MarketData) -> pd.DataFrame:

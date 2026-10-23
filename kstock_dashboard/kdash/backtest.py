@@ -9,22 +9,26 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .data import MarketData, build_snapshot
+from .data import MarketData, StockData, build_snapshot
 from .scoring import compute_score, load_config
 
 BINS = [-100, -50, -20, 20, 50, 100]
 BIN_LABELS = ["≤-50", "-50~-20", "-20~20", "20~50", "≥50"]
 
 
-def run_backtest(md: MarketData, horizon: str = "1d", warmup: int = 30, cfg: dict | None = None) -> pd.DataFrame:
+def run_backtest(md: MarketData, sd: StockData, peers: dict, horizon: str = "1d",
+                 warmup: int = 30, cfg: dict | None = None) -> pd.DataFrame:
+    """cfg 는 종목 업종 프로필이 적용된 설정(scoring.profile_config)을 넘긴다."""
     cfg = cfg or load_config()
     h = cfg["horizons"][horizon]["days"]
-    hx = md.prices["hynix"]
+    hx = sd.ohlcv
+    if hx is None:
+        return pd.DataFrame()
     dates = hx.index
     rows = []
     for i in range(warmup, len(dates) - h + 1):
         t = dates[i]
-        res = compute_score(build_snapshot(md, t), horizon, cfg)
+        res = compute_score(build_snapshot(md, sd, peers, t), horizon, cfg)
         if res.score is None:
             continue
         fwd = hx["Close"].iloc[i + h - 1] / hx["Open"].iloc[i] - 1

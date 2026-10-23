@@ -3,29 +3,40 @@ from datetime import date, datetime
 import pytest
 
 from kdash import calendar as cal
-from kdash.data import build_snapshot, load_sample
-from kdash.scoring import compute_score, judge, load_config, rule_rsi, rule_trend
+from kdash.data import build_snapshot, load_common_sample, load_peers_sample, load_stock_sample
+from kdash.scoring import compute_score, judge, load_config, peer_tickers, profile_config, rule_rsi, rule_trend
+from kdash.stocks import bundled_stocks, search, stock_info
 
-CFG = load_config()
+BASE = load_config()
+CFG = profile_config(BASE, "semiconductor")
 
 
 def full_snapshot(**over):
     snap = {
-        "sox_ret": 0.024, "mu_ret": 0.031, "nvda_ret": 0.018, "ewy_ret": 0.01,
+        "peer:^SOX": 0.024, "peer:MU": 0.031, "peer:NVDA": 0.018, "peer:EWY": 0.01,
         "foreign_5d_ratio": 0.3, "inst_5d_ratio": 0.1, "foreign_streak": 3, "short_change": -0.02,
         "close": 100, "ma5": 98, "ma20": 95, "rsi14": 76, "vol_ratio": 1.1, "day_ret": 0.01, "ret_3d": 0.03,
         "usdkrw_chg": 0.004, "us10y_chg_bp": 6, "vix_chg": 0.0, "kospi_foreign_net": 0,
-        "dram_chg": 0.0, "eps_revision": 0, "export_surprise_pp": 0, "news": 0, "vix": 18,
+        "industry_chg": 0.0, "eps_revision": 0, "export_surprise_pp": 0, "news": 0, "vix": 18,
     }
     snap.update(over)
     return snap
 
 
 def test_area_weights_sum_to_one():
-    for h in CFG["horizons"].values():
+    for h in BASE["horizons"].values():
         assert sum(h["areas"].values()) == pytest.approx(1.0)
-    for a in CFG["areas"].values():
-        assert sum(i["weight"] for i in a["indicators"]) == pytest.approx(1.0)
+    for sector in BASE["sector_profiles"]:
+        for a in profile_config(BASE, sector)["areas"].values():
+            assert sum(i["weight"] for i in a["indicators"]) == pytest.approx(1.0), sector
+
+
+def test_profile_fills_global_area():
+    cfg = profile_config(BASE, "battery")
+    keys = [i["inputs"][0] for i in cfg["areas"]["global"]["indicators"]]
+    assert "peer:TSLA" in keys
+    assert profile_config(BASE, "없는업종")["areas"]["global"]["indicators"][0]["inputs"] == ["peer:^GSPC"]
+    assert peer_tickers(BASE, ["semiconductor", "battery"]).count("EWY") == 1
 
 
 def test_rules():
@@ -37,16 +48,16 @@ def test_rules():
 def test_score_bounds_and_direction():
     up = compute_score(full_snapshot(), "1d", CFG)
     assert up.score > 0 and -100 <= up.score <= 100
-    down = compute_score(full_snapshot(sox_ret=-0.05, mu_ret=-0.06, nvda_ret=-0.06, ewy_ret=-0.03,
+    down = compute_score(full_snapshot(**{"peer:^SOX": -0.05, "peer:MU": -0.06, "peer:NVDA": -0.06, "peer:EWY": -0.03},
                                        foreign_5d_ratio=-0.6, foreign_streak=-5), "1d", CFG)
     assert down.score < 0
 
 
 def test_maximum_signal_is_100():
-    snap = full_snapshot(sox_ret=1, mu_ret=1, nvda_ret=1, ewy_ret=1, foreign_5d_ratio=9, inst_5d_ratio=9,
+    snap = full_snapshot(**{"peer:^SOX": 1, "peer:MU": 1, "peer:NVDA": 1, "peer:EWY": 1}, foreign_5d_ratio=9, inst_5d_ratio=9,
                          foreign_streak=9, short_change=-9, rsi14=21, vol_ratio=2, day_ret=0.01, ret_3d=-0.1,
                          usdkrw_chg=-1, us10y_chg_bp=-99, vix_chg=-1, kospi_foreign_net=1e13,
-                         dram_chg=1, eps_revision=1, export_surprise_pp=99, news=1)
+                         industry_chg=1, eps_revision=1, export_surprise_pp=99, news=1)
     r = compute_score(snap, "5d", CFG)
     # 규칙 지표(RSI 0.5, 반전 0.5)는 최대가 1이 아니므로 100보다 작다
     assert 80 < r.score <= 100
@@ -54,7 +65,7 @@ def test_maximum_signal_is_100():
 
 def test_missing_data_holds_judgement():
     snap = {k: v for k, v in full_snapshot().items() if not k.startswith(("foreign", "inst", "short"))}
-    for k in ("dram_chg", "eps_revision", "export_surprise_pp", "news"):
+    for k in ("industry_chg", "eps_revision", "export_surprise_pp", "news"):
         snap.pop(k)
     r = compute_score(snap, "5d", CFG)
     assert r.judgement == "판단 보류"
@@ -114,12 +125,31 @@ def test_risk_adjustment_uses_window():
     assert m5 == 0.7 and multi
 
 
+def test_stock_specific_events():
+    events = cal.build_events()
+    hynix = events[cal.applies_to(events, "000660", "semiconductor")]
+    bank = events[cal.applies_to(events, "105560", "finance")]
+    assert "SK하이닉스 3분기 실적" in set(hynix["title"]) and "엔비디아 실적" in set(hynix["title"])
+    assert "SK하이닉스 3분기 실적" not in set(bank["title"]) and "엔비디아 실적" not in set(bank["title"])
+    assert "FOMC 금리 결정" in set(bank["title"])
+
+
 # ---------------------------------------------------------------- 데이터
 def test_snapshot_has_no_lookahead():
-    md = load_sample(days=120)
-    t = md.prices["hynix"].index[-10]
-    snap = build_snapshot(md, t)
-    prev_close = md.prices["hynix"]["Close"][md.prices["hynix"].index < t].iloc[-1]
-    assert snap["close"] == pytest.approx(prev_close)
+    md, sd = load_common_sample(120), load_stock_sample("000660", 120)
+    peers = load_peers_sample(peer_tickers(BASE, ["semiconductor"]), 120)
+    t = sd.ohlcv.index[-10]
+    snap = build_snapshot(md, sd, peers, t)
+    assert snap["close"] == pytest.approx(sd.ohlcv["Close"][sd.ohlcv.index < t].iloc[-1])
+    assert snap["peer:^SOX"] is not None
     r = compute_score(snap, "1d", CFG)
-    assert r.score is not None
+    assert r.score is not None and r.judgement != "판단 보류"
+
+
+def test_stock_search_and_info():
+    stocks = bundled_stocks()
+    assert search(stocks, "삼성").iloc[0]["name"].startswith("삼성")
+    assert search(stocks, "000660").iloc[0]["name"] == "SK하이닉스"
+    assert stock_info(stocks, "000660", {"sectors": {}})["sector"] == "semiconductor"
+    assert stock_info(stocks, "000660", {"sectors": {"000660": "default"}})["sector"] == "default"
+    assert stock_info(stocks, "999999", {"sectors": {}})["sector"] == "default"

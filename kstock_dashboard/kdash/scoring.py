@@ -1,10 +1,11 @@
-"""SK하이닉스 단기 방향 점수 모델.
+"""종목 단기 방향 점수 모델.
 
 세부 지표 점수(-1 ~ +1) → 영역 점수(가중평균) → 최종 점수(-100 ~ +100).
 가중치와 기준값은 config/model.yaml 에서 읽는다.
 """
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,35 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "model.yaml"
 def load_config(path: Path | str = CONFIG_PATH) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def sector_profiles(cfg: dict) -> dict:
+    return cfg["sector_profiles"]
+
+
+def profile_config(cfg: dict, sector: str) -> dict:
+    """업종 프로필로 A 영역(글로벌 연관 지표)과 E 영역 업황 지표 이름을 채운 설정."""
+    prof = cfg["sector_profiles"].get(sector) or cfg["sector_profiles"]["default"]
+    out = copy.deepcopy(cfg)
+    out["areas"]["global"]["indicators"] = [
+        {"key": f"peer_{p['ticker']}", "label": f"{p['label']} 전일 수익률", "weight": p["weight"],
+         "rule": "linear", "inputs": [f"peer:{p['ticker']}"], "scale": p["scale"]}
+        for p in prof["peers"]
+    ]
+    for ind in out["areas"]["industry"]["indicators"]:
+        if ind["key"] == "industry":
+            ind["label"] = prof.get("industry_label", ind["label"])
+    return out
+
+
+def peer_tickers(cfg: dict, sectors) -> list[str]:
+    seen = []
+    for sec in sectors:
+        prof = cfg["sector_profiles"].get(sec) or cfg["sector_profiles"]["default"]
+        for p in prof["peers"]:
+            if p["ticker"] not in seen:
+                seen.append(p["ticker"])
+    return seen
 
 
 def clip(x: float, lo: float = -1.0, hi: float = 1.0) -> float:

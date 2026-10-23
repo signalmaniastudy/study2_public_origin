@@ -3,6 +3,8 @@
 # - time + tz: 발표 시각과 시간대(ET 또는 KST). 한국시간 변환과 서머타임은 코드에서 자동 처리
 # - time이 없으면 발표일 당일 한국장에 반영되는 것으로 본다
 # - tier: 1(점수 강하게 조정) / 2(약하게 조정) / 3(표시만)
+# - ticker: 특정 종목에만 적용 (예: "000660"), sectors: 해당 업종 프로필 종목에만 적용 (예: [semiconductor])
+#   둘 다 없으면 모든 종목에 적용되는 시장 이벤트
 # - 옵션 만기(둘째 목요일)와 미국 신규 실업수당 청구(매주 목요일)는 코드가 규칙으로 생성
 #
 # 공식 출처: 연준 FOMC 캘린더, BLS·BEA 발표 일정, 한국은행 금통위 일정,
@@ -57,13 +59,13 @@ events:
   - {date: 2027-01-01, time: "09:00", tz: KST, title: 12월 수출입 동향, region: KR, category: 한국 매크로, tier: 2}
 
   # ---------------- 실적
-  - {date: 2026-10-29, title: SK하이닉스 3분기 실적, region: KR, category: 실적, tier: 1, note: "확정 공시(실적 발표 예고) 확인"}
-  - {date: 2026-10-29, title: 삼성전자 3분기 확정 실적, region: KR, category: 실적, tier: 2}
-  - {date: 2026-11-18, time: "16:20", tz: ET, title: 엔비디아 실적, region: US, category: 실적, tier: 1}
-  - {date: 2026-12-16, time: "16:00", tz: ET, title: 마이크론 실적, region: US, category: 실적, tier: 1}
-  - {date: 2026-11-10, title: TSMC 10월 매출, region: TW, category: 실적, tier: 2}
-  - {date: 2026-12-10, title: TSMC 11월 매출, region: TW, category: 실적, tier: 2}
-  - {date: 2027-01-07, time: "08:00", tz: KST, title: 삼성전자 4분기 잠정 실적, region: KR, category: 실적, tier: 1}
+  - {date: 2026-10-29, title: SK하이닉스 3분기 실적, ticker: "000660", region: KR, category: 실적, tier: 1, note: "확정 공시(실적 발표 예고) 확인"}
+  - {date: 2026-10-29, title: 삼성전자 3분기 확정 실적, ticker: "005930", sectors: [semiconductor], region: KR, category: 실적, tier: 2}
+  - {date: 2026-11-18, time: "16:20", tz: ET, title: 엔비디아 실적, sectors: [semiconductor], region: US, category: 실적, tier: 1}
+  - {date: 2026-12-16, time: "16:00", tz: ET, title: 마이크론 실적, sectors: [semiconductor], region: US, category: 실적, tier: 1}
+  - {date: 2026-11-10, title: TSMC 10월 매출, sectors: [semiconductor], region: TW, category: 실적, tier: 2}
+  - {date: 2026-12-10, title: TSMC 11월 매출, sectors: [semiconductor], region: TW, category: 실적, tier: 2}
+  - {date: 2027-01-07, time: "08:00", tz: KST, title: 삼성전자 4분기 잠정 실적, ticker: "005930", sectors: [semiconductor], region: KR, category: 실적, tier: 1}
 
   # ---------------- 시장 구조
   - {date: 2026-11-11, time: "17:00", tz: ET, title: MSCI 11월 정기 리뷰 발표, region: GL, category: 시장 구조, tier: 2}
