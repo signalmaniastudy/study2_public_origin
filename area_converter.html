@@ -141,20 +141,34 @@
     white-space:nowrap;
   }
 
-  .swap-divider{
+  .swap-btn{
+    align-self:center;
     display:flex;
     align-items:center;
-    gap:12px;
+    gap:8px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:8px 16px;
     color:var(--ink-dim);
     font-size:11.5px;
-    letter-spacing:0.08em;
+    letter-spacing:0.06em;
+    font-family:inherit;
+    cursor:pointer;
+    transition:border-color .15s ease, color .15s ease, transform .15s ease;
   }
-  .swap-divider::before,
-  .swap-divider::after{
-    content:"";
-    flex:1;
-    height:1px;
-    background:var(--line);
+  .swap-btn:hover{
+    border-color:var(--accent);
+    color:var(--accent);
+  }
+  .swap-btn:active{
+    transform:scale(0.96);
+  }
+  .swap-btn svg{
+    transition:transform .2s ease;
+  }
+  .swap-btn.flipped svg{
+    transform:rotate(180deg);
   }
 
   .factor-note{
@@ -243,7 +257,10 @@
       </div>
     </div>
 
-    <div class="swap-divider">자동 변환</div>
+    <button type="button" class="swap-btn" id="swapBtn" aria-label="평과 제곱미터 순서 바꾸기">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><line x1="3" y1="5" x2="21" y2="5"></line><polyline points="7 23 3 19 7 15"></polyline><line x1="21" y1="19" x2="3" y2="19"></line></svg>
+      <span>순서 바꾸기</span>
+    </button>
 
     <div class="field">
       <label><span>제곱미터</span><span class="unit-tag">㎡</span></label>
@@ -289,6 +306,16 @@
     const v = parseFloat(sqmInput.value);
     pyeongInput.value = isNaN(v) ? '' : formatNumber(v / PYEONG_TO_SQM);
     updating = false;
+  });
+
+  const swapBtn = document.getElementById('swapBtn');
+  const card = document.querySelector('.card');
+  swapBtn.addEventListener('click', () => {
+    const fields = card.querySelectorAll('.field');
+    const a = fields[0], b = fields[1];
+    card.insertBefore(b, a);
+    card.insertBefore(swapBtn, a);
+    swapBtn.classList.toggle('flipped');
   });
 
   const standardSizes = [
